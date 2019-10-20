@@ -1,25 +1,24 @@
 """
 Module for computing ROC curves and AUC scores
+Modified by Dr. Fayyaz Minhas
+Originally from: https://sourceforge.net/projects/pyml/
 
-Theoretical and pratical concepts from 
-Fawcett, T.  ROC graphs: Notes and pratical considerations
-for data mining researchers.  HPL-2003-4, 2003.
-
-By Michael Hamilton, 2009
-With edits by Asa Ben-Hur 2010
 """
 
 import numpy
 from bisect import bisect_left # for binary search
-
+import numpy.random as rand
+import matplotlib.pyplot as plt
+from scipy.spatial import ConvexHull
+import numpy as np
 __docformat__ = "restructuredtext en"
 
-def roc( dvals, labels, rocN=None, normalize=True ) :
+def roc( labels, dvals, rocN=None, normalize=True ) :
     """
     Compute ROC curve coordinates and area
 
     - `dvals`  - a list with the decision values of the classifier
-    - `labels` - list with class labels, \in {0, 1} 
+    - `labels` - list with class labels with positive class as +1 (all other will be taken as negative)
 
     returns (FP coordinates, TP coordinates, AUC )
     """
@@ -37,10 +36,11 @@ def roc( dvals, labels, rocN=None, normalize=True ) :
     area = 0.0
 
     num_pos = labels.count( 1 )  # number of pos labels
-    num_neg = labels.count( 0 ) # number of neg labels
+    num_neg = len(labels)-num_pos # number of neg labels
     
     if num_pos == 0 or num_pos == len(labels) :
-        raise ValueError, "There must be at least one example from each class"
+        raise(ValueError( "There must be at least one example from each class"))
+        
 
     # sort decision values from highest to lowest
     indices = numpy.argsort( dvals )[ ::-1 ]
@@ -207,7 +207,7 @@ def plotROC(rocFP, rocTP, fileName = None, **args) :
     :Keywords:
       - `normalize` - whether to normalize the ROC curve (default: True)
       - `plotStr` - which string to pass to matplotlib's plot function
-        default: 'ob'
+        default: 'k-'
       - `axis` - redefine the figure axes; takes a list of the form
         [xmin,xmax,ymin,ymax]
       - `show` - whether to show the ROC curve (default: True)
@@ -223,7 +223,7 @@ def plotROC(rocFP, rocTP, fileName = None, **args) :
     if 'plotStr' in args :
         plotStr = args['plotStr']
     else :
-        plotStr = 'ob'
+        plotStr = 'ko-'
     rocNormalize = True
     if 'normalize' in args :
         rocNormalize = args['normalize']
@@ -262,136 +262,70 @@ def plotROC(rocFP, rocTP, fileName = None, **args) :
     if fileName is not None :
         pylab.savefig(fileName)
     if show :
-        pylab.show()
-
-def plotROCs(resList, descriptions = None, fileName = None, **args) :
-
-    """
-    plot multiple ROC curves.
-
-    :Parameters:
-      - `resList` - a list or dictionary of Result or Result-like objects
-      - `descriptions` - text for the legend (a list the size of resList).
-        A legend is not shown if this parameter is not given
-        In the case of a dictionary input the description for the legend is
-        taken from the dictionary keys.
-      - `fileName` - if given, a file to save the figure in
-
-    :Keywords:
-      - `legendLoc` - the position of the legend -- an integer between 0 and 9;
-        see the matplotlib documentation for details
-      - `plotStrings` - a list of matlab style plotting string to send to the
-        plotROC function (instead of the plotString keyword of plotROC)
-      - `other keywords` - keywords of the plotROC function 
-    """
-
-    if type(resList) == type([]) and type(resList[0]) == type('') :
-        fileNames = resList
-        resList = []
-        for fileName in fileNames :
-            resList.append(myio.load(fileName))
-        if descriptions is None :
-            descriptions = []
-            for fileName in fileNames :
-                descriptions.append(os.path.splitext(fileName)[0])
-
-    import matplotlib
-    show = True
-    if fileName is not None and fileName.find('.svg') > 0 :
-        matplotlib.use('SVG')
-        show = False
-    if fileName is not None and fileName.find('.eps') > 0 :
-        matplotlib.use('PS')
-        show = False
-                
-    from matplotlib import pylab
-    args['show'] = False
-    
-    plotStrings = ['bo', 'k^', 'rv', 'g<', 'm>', 'k<']
-    plotStrings = ['b-', 'k--', 'r-', 'g-.', 'm-', 'k:', 'b-', 'r-', 'g-']
-    #plotStrings = ['b:', 'k-.', 'b-', 'g-', 'm-', 'k-', 'b-', 'r-', 'g-']
-    if 'plotStrings' in args :
-        plotStrings = args['plotStrings']
-    if type(resList) == type([]) :
-        for i in range(len(resList)) :
-            args['plotStr'] = plotStrings[i]
-            resList[i].plotROC(**args)
-    else :
-        if descriptions is None :
-            descriptions = [key for key in resList]
-        i = 0
-        for key in resList :
-            args['plotStr'] = plotStrings[i]
-            resList[key].plotROC(**args)
-            i+=1
-
-    if descriptions is not None :
-        legendLoc = 'best'
-        if 'legendLoc' in args :
-            legendLoc = args['legendLoc']
-        pylab.legend(descriptions, loc = legendLoc)
-        leg = pylab.gca().get_legend()
-        ltext  = leg.get_texts()  # all the text.Text instance in the legend
-        llines = leg.get_lines()  # all the lines.Line2D instance in the legend
-        frame  = leg.get_frame()  # the Rectangle instance surrounding the legend
-
-        #frame.set_facecolor(0.80)     # set the frame face color to light gray
-        for obj in ltext :
-            obj.set_size(14)
-        #leg.draw_frame(False)         # don't draw the legend frame
-
-    if fileName is not None :
-        pylab.savefig(fileName)
-    if show :
+        plt.grid()
         pylab.show()
 
 
-def test():
+def rocch(fpr0,tpr0):
+    """
+    @author: Dr. Fayyaz Minhas (http://faculty.pieas.edu.pk/fayyaz/)
+    Construct the convex hull of a Receiver Operating Characteristic (ROC) curve
+        Input:
+            fpr0: List of false positive rates in range [0,1]
+            tpr0: List of true positive rates in range [0,1]
+                fpr0,tpr0 can be obtained from sklearn.metrics.roc_curve or 
+                    any other packages such as pyml
+        Return:
+            F: list of false positive rates on the convex hull
+            T: list of true positive rates on the convex hull
+                plt.plot(F,T) will plot the convex hull
+            auc: Area under the ROC Convex hull
+    """
+    fpr = np.array([0]+list(fpr0)+[1.0,1,0])
+    tpr = np.array([0]+list(tpr0)+[1.0,0,0])
+    hull = ConvexHull(np.vstack((fpr,tpr)).T)
+    vert = hull.vertices
+    vert = vert[np.argsort(fpr[vert])]  
+    F = [0]
+    T = [0]
+    for v in vert:
+        ft = (fpr[v],tpr[v])
+        if ft==(0,0) or ft==(1,1) or ft==(1,0):
+            continue
+        F+=[fpr[v]]
+        T+=[tpr[v]]
+    F+=[1]
+    T+=[1]
+    auc = np.trapz(T,F)
+    return F,T,auc
+
+if __name__=='__main__':
     # Testing
-    import numpy.random as rand
-    import pylab
-
     ############## Make synthetic data #################
-
     # Simulate protein binding site by having few positive
     # class examples 
     folds = [ ]
-    labs = [ -1 ] * 500
-    labs.extend( [ 1 ] * 20 )
-    N = 40  # number of sequences
-    
+    N = 5  # number of folds    
     # set means of decision values
     mu_n = -1
-    mu_p = 1
-    
-    # draw decision values from normal distribution
-    # for each class
-    for i in xrange( N ):
-        preds = rand.normal( mu_n, 1, 500 ).tolist()
-        preds.extend( rand.normal( mu_p, 1, 20 ).tolist() )
+    mu_p = 1    
+    # draw decision values from normal distribution for each class
+    for i in range( N ):
+        Np = int(100*np.random.rand())+1
+        Nn = int(200*np.random.rand())+1
+        preds = rand.normal( mu_n, 1, Nn ).tolist()
+        preds.extend( rand.normal( mu_p, 1, Np ).tolist() )
+        labs = [ -1 ] * Nn
+        labs.extend( [ 1 ] * Np )
+        print("Fold",i,"Pos:",Np,"Neg",Nn)        
         folds.append( ( labs[ : ], preds ) )
-
+    ############## Plot Convex Hull ROC #################
     # Calculate average ROC curve
-    fpr, tpr, tpr_ci, area, area_ci = roc_VA( folds )
-
-    # Print AUC with confidence interval
-    print "area: %f, 95%% CI: (%f, %f)" % ( area, area-area_ci, area+area_ci )
-
-    ####### Plot ROC curve with 95% confidence band  #######
-    fig = pylab.figure( )
-    ax = fig.add_subplot( 111 )
-    # fill upper band
-    xs, ys = pylab.poly_between( fpr, tpr, numpy.array( tpr ) + numpy.array( tpr_ci ) ) 
-    ax.fill( xs, ys, 'r' )
-    # fill lower band
-    xs, ys = pylab.poly_between( fpr, tpr, numpy.array( tpr ) - numpy.array( tpr_ci ) ) 
-    ax.fill( xs, ys, 'r' )
-    # label axes and main
-    pylab.xlabel( "FPR" )
-    pylab.ylabel( "TPR" )
-    pylab.title( "Example ROC curve with 95% confidence band" )
-    ax.plot( numpy.arange( 0, 1.1, .1 ), numpy.arange( 0, 1.1, .1  ), 'k--')
-    pylab.xlim( -.01, 1.01 )
-    pylab.ylim( -.01, 1.01 )
-    pylab.show( )
+    fpr0, tpr0, area0 = roc_VA( folds ) #get average plot across folds
+    plotROC(fpr0, tpr0);
+    fpr,tpr,area = rocch(fpr0,tpr0) #make convex hull
+    plotROC(fpr, tpr);
+    print("AUC-ROC:",area0,"AUC-ROCCH:",area)
+    # You can plot your own way by using the line below
+    #plt.plot(fpr,tpr); plt.grid(); plt.xlabel('FPR'); plt.ylabel('TPR')
     
